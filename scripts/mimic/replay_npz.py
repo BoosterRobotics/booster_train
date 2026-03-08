@@ -1,12 +1,12 @@
-"""This script demonstrates how to replay K1 robot motions from npz files.
+"""This script demonstrates how to replay robot motions from npz files.
 
 .. code-block:: bash
 
     # Usage - Direct file path
-    python replay_npz.py --motion <path_to_motion.npz>
+    python replay_npz.py --motion <path_to_motion.npz> --robot k1
     
     # Usage - From wandb registry
-    python replay_npz.py --registry_name <wandb_registry_name>
+    python replay_npz.py --registry_name <wandb_registry_name> --robot t1
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -23,6 +23,13 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Replay converted motions.")
 parser.add_argument("--motion", type=str, default=None, help="Path to the motion npz file.")
 parser.add_argument("--registry_name", type=str, default=None, help="The name of the wand registry.")
+parser.add_argument(
+    "--robot",
+    type=str.lower,
+    default="k1",
+    choices=["k1", "t1"],
+    help="Target robot type. Defaults to k1. Use t1 to replay T1 motion format.",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -45,8 +52,14 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 ##
 # Pre-defined configs
 ##
-from booster_train.assets.robots.booster import BOOSTER_K1_CFG
+from booster_train.assets.robots.booster import BOOSTER_K1_CFG, BOOSTER_T1_CFG
 from booster_train.tasks.manager_based.beyond_mimic.mdp.commands import MotionLoader
+
+
+ROBOT_CONFIGS = {
+    "k1": BOOSTER_K1_CFG,
+    "t1": BOOSTER_T1_CFG,
+}
 
 
 @configclass
@@ -95,15 +108,18 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     else:
         raise ValueError("Either --motion or --registry_name must be provided.")
 
-    # Load npz file to get body names and determine body_indexes
-    # For K1, we typically use Trunk as anchor body (index 0)
-    # body_indexes should be a list of indices corresponding to the bodies we want to use
-    # For replay, we only need the anchor body (Trunk), which is typically at index 0
-    body_indexes = [0]  # Default to index 0 for anchor body (Trunk)
+    with np.load(motion_file) as motion_data:
+        motion_body_names = motion_data["body_names"].tolist() if "body_names" in motion_data else robot.body_names
+
+    # For both K1/T1 converted motions, the anchor body is stored at index 0.
+    anchor_body_name = motion_body_names[0]
     
     motion = MotionLoader(
         motion_file,
-        body_indexes,
+        [anchor_body_name],
+        robot.joint_names,
+        default_motion_body_names=robot.body_names,
+        default_motion_joint_names=robot.joint_names,
         tail_len=0,
         device=str(sim.device),
     )
@@ -116,7 +132,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         time_steps[reset_ids] = 0
 
         root_states = robot.data.default_root_state.clone()
-        root_states[:, :3] = motion.body_pos_w[time_steps][:, 0] + scene.env_origins[:, None, :]
+        root_states[:, :3] = motion.body_pos_w[time_steps][:, 0]
+        root_states[:, :2] += scene.env_origins[:, :2]
         root_states[:, 3:7] = motion.body_quat_w[time_steps][:, 0]
         root_states[:, 7:10] = motion.body_lin_vel_w[time_steps][:, 0]
         root_states[:, 10:] = motion.body_ang_vel_w[time_steps][:, 0]
@@ -132,11 +149,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
 
 def main():
+    robot_cfg = ROBOT_CONFIGS[args_cli.robot]
+
     sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
     sim_cfg.dt = 0.02
     sim = SimulationContext(sim_cfg)
 
     scene_cfg = ReplayMotionsSceneCfg(num_envs=1, env_spacing=2.0)
+    scene_cfg.robot = robot_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
     scene = InteractiveScene(scene_cfg)
     sim.reset()
     # Run the simulator

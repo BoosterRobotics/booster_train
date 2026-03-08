@@ -4,6 +4,7 @@
 
 This repository provides a set of reinforcement learning tasks for Booster robots using [Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/index.html).
 Currently it includes the fabulous [BeyondMimic motion tracking](https://github.com/HybridRobotics/whole_body_tracking) framework adapted to Booster K1 robots.
+The motion conversion and replay utilities under `scripts/mimic/` support both Booster K1 and T1 robots.
 This repository follows the standard Isaac Lab project structure, and is tested with IsaacLab 2.2 and Isaac Sim 5.0.
 
 ## Installation
@@ -30,8 +31,14 @@ This repository follows the standard Isaac Lab project structure, and is tested 
 - Prepare BeyondMimic motion data:
     ```bash
     # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python scripts/csv_to_npz.py --headless --input_file=<PATH_TO_BOOSTER_ASSETS>/motions/K1/<MOTION>.csv --input_fps=<FPS> --output_name=<PATH_TO_BOOSTER_ASSETS>/motions/K1/<MOTION>.npz
+    python scripts/mimic/csv_to_npz.py --headless --input_file=<PATH_TO_BOOSTER_ASSETS>/motions/<ROBOT>/<MOTION>.csv --input_fps=<FPS> --output_file=<PATH_TO_BOOSTER_ASSETS>/motions/<ROBOT>/<MOTION>.npz --output_fps=50 --robot=<k1|t1>
     ```
+
+    Optional arguments:
+
+    - `--robot=t1` converts T1 motion files. The default robot is `k1`.
+    - `--frame_range <START> <END>` converts only a subset of frames. Frame indices are 1-based and inclusive.
+    - `--output_fps` controls the interpolation rate of the exported `.npz` motion.
 
 ## Usage
 
@@ -57,6 +64,17 @@ This repository follows the standard Isaac Lab project structure, and is tested 
     ```
 
     This script also exports the trained policy to a TorchScript/ONNX file for deployment on real robots in `logs/rsl_rl/<EXPERIMENT>/<RUN>/exported/`.
+
+- Replay a converted motion file for inspection:
+
+    ```bash
+    python scripts/mimic/replay_npz.py --motion=<PATH_TO_MOTION>.npz --robot=<k1|t1>
+
+    # or download and replay from Weights & Biases registry
+    python scripts/mimic/replay_npz.py --registry_name=<WANDB_REGISTRY_NAME> --robot=<k1|t1>
+    ```
+
+    When `--registry_name` does not include an alias, the script automatically uses `:latest`.
 
 ## Deploy
 

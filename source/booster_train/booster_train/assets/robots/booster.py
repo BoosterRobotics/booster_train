@@ -329,3 +329,19 @@ BOOSTER_T1_CFG = ArticulationCfg(
         ),
     },
 )
+
+T1_ACTION_SCALE = {}
+for a in BOOSTER_T1_CFG.actuators.values():
+    e = a.effort_limit_sim
+    s = a.stiffness
+    names = a.joint_names_expr
+    if not isinstance(e, dict):
+        e = {n: e for n in names}
+    if not isinstance(s, dict):
+        s = {n: s for n in names}
+    for n in names:
+        if n in e and n in s and s[n]:
+            T1_ACTION_SCALE[n] = 0.25 * e[n] / s[n]
+
+print(f'{BOOSTER_T1_CFG.actuators=}')
+print(f'{T1_ACTION_SCALE=}')

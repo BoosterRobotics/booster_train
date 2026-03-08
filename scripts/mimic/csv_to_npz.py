@@ -4,7 +4,7 @@
 
     # Usage
     python csv_to_npz.py --input_file LAFAN/dance1_subject2.csv --input_fps 30 --frame_range 122 722 \
-    --output_file ./motions/dance1_subject2.npz --output_fps 50
+    --output_file ./motions/dance1_subject2.npz --output_fps 50 --robot k1
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -29,8 +29,15 @@ parser.add_argument(
         " loaded."
     ),
 )
-parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
+parser.add_argument("--output_file", type=str, required=True, help="The name of the motion npz file.")
 parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
+parser.add_argument(
+    "--robot",
+    type=str.lower,
+    default="k1",
+    choices=["k1", "t1"],
+    help="Target robot type. Defaults to k1. Use t1 to convert T1 motion format.",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -57,8 +64,14 @@ from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, 
 # Pre-defined configs
 ##
 # Booster assets currently only provide retargeted motion data for Booster K1 robot
-from booster_train.assets.robots.booster import BOOSTER_K1_CFG as ROBOT_CFG
-from booster_assets.motions import K1_JOINT_NAMES as JOINT_NAMES
+from booster_train.assets.robots.booster import BOOSTER_K1_CFG, BOOSTER_T1_CFG
+from booster_assets.motions import K1_JOINT_NAMES, T1_JOINT_NAMES
+
+
+ROBOT_CONFIGS = {
+    "k1": (BOOSTER_K1_CFG, K1_JOINT_NAMES),
+    "t1": (BOOSTER_T1_CFG, T1_JOINT_NAMES),
+}
 
 
 @configclass
@@ -78,7 +91,7 @@ class ReplayMotionsSceneCfg(InteractiveSceneCfg):
     )
 
     # articulation
-    robot: ArticulationCfg = ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = BOOSTER_K1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
 
 class MotionLoader:
@@ -194,12 +207,15 @@ class MotionLoader:
     def get_next_state(
         self,
     ) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
+        tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ],
+        bool,
     ]:
         """Gets the next state of the motion."""
         state = (
@@ -303,19 +319,22 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
             ):
                 log[k] = np.stack(log[k], axis=0)
 
-            np.savez(f"{args_cli.output_name}", **log)
-            print(f"[INFO]: Motion saved to {args_cli.output_name}")
+            np.savez(f"{args_cli.output_file}", **log)
+            print(f"[INFO]: Motion saved to {args_cli.output_file}")
             sys.exit(0)
 
 
 def main():
     """Main function."""
+    robot_cfg, joint_names = ROBOT_CONFIGS[args_cli.robot]
+
     # Load kit helper
     sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
     sim_cfg.dt = 1.0 / args_cli.output_fps
     sim = SimulationContext(sim_cfg)
     # Design scene
     scene_cfg = ReplayMotionsSceneCfg(num_envs=1, env_spacing=2.0)
+    scene_cfg.robot = robot_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
     scene = InteractiveScene(scene_cfg)
     # Play the simulator
     sim.reset()
@@ -325,7 +344,7 @@ def main():
     run_simulator(
         sim,
         scene,
-        joint_names=JOINT_NAMES,
+        joint_names=joint_names,
     )
 
 

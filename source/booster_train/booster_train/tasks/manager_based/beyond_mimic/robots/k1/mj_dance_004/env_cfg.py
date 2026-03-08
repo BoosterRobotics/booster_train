@@ -84,3 +84,11 @@ class FlatLowFreqEnvCfg(FlatEnvCfg):
         super().__post_init__()
         self.decimation = round(self.decimation / LOW_FREQ_SCALE)
         self.rewards.action_rate_l2.weight *= LOW_FREQ_SCALE
+
+
+@configclass
+class PlayFlatWoStateEstimationEnvCfg(FlatWoStateEstimationEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.motion.play = True
+        self.events.push_robot = None
