@@ -8,6 +8,8 @@ from isaaclab.actuators import DelayedPDActuator, DelayedPDActuatorCfg, Implicit
 from isaaclab.utils import DelayBuffer, configclass
 from isaaclab.utils.types import ArticulationActions
 
+RPM2RADPS = 2 * torch.pi / 60
+
 
 class DelayedImplicitActuator(ImplicitActuator):
     """Ideal PD actuator with delayed command application.
@@ -179,12 +181,16 @@ class BoosterDelayedActuatorCfg(DelayedPDActuatorCfg):
     damping: dict[str, float] | float | None = None
 
     booster_joint_cfgs: dict[str, BoosterJointCfg] | BoosterJointCfg | None = None
+    effort_limit_sim_multiplier: float = 1.0
+    velocity_limit_sim_multiplier: float = 1.0
 
     def __post_init__(self):
         if self.booster_joint_cfgs is not None:
             if isinstance(self.booster_joint_cfgs, BoosterJointCfg):
-                self.effort_limit_sim = self.booster_joint_cfgs.effort_limit
-                self.velocity_limit_sim = self.booster_joint_cfgs.velocity_limit
+                self.effort_limit = self.booster_joint_cfgs.effort_limit
+                self.effort_limit_sim = self.booster_joint_cfgs.effort_limit * self.effort_limit_sim_multiplier
+                self.velocity_limit = self.booster_joint_cfgs.velocity_limit
+                self.velocity_limit_sim = self.booster_joint_cfgs.velocity_limit * self.velocity_limit_sim_multiplier
                 self.knee_point_velocity = self.booster_joint_cfgs.knee_point_velocity
                 self.armature = self.booster_joint_cfgs.armature
                 if self.stiffness is None:
@@ -193,11 +199,19 @@ class BoosterDelayedActuatorCfg(DelayedPDActuatorCfg):
                     self.damping = self.booster_joint_cfgs.damping
 
             elif isinstance(self.booster_joint_cfgs, dict):
-                self.effort_limit_sim = {
+                self.effort_limit = {
                     joint_name: joint_cfg.effort_limit for joint_name, joint_cfg in self.booster_joint_cfgs.items()
                 }
-                self.velocity_limit_sim = {
+                self.effort_limit_sim = {
+                    joint_name: joint_cfg.effort_limit * self.effort_limit_sim_multiplier
+                    for joint_name, joint_cfg in self.booster_joint_cfgs.items()
+                }
+                self.velocity_limit = {
                     joint_name: joint_cfg.velocity_limit for joint_name, joint_cfg in self.booster_joint_cfgs.items()
+                }
+                self.velocity_limit_sim = {
+                    joint_name: joint_cfg.velocity_limit * self.velocity_limit_sim_multiplier
+                    for joint_name, joint_cfg in self.booster_joint_cfgs.items()
                 }
                 self.armature = {
                     joint_name: joint_cfg.armature for joint_name, joint_cfg in self.booster_joint_cfgs.items()
@@ -252,32 +266,6 @@ class ParallelJointWrapperCfg(BoosterJointCfg):
         self.armature = self.armature_ratio[self.serial_index] * self.base_joint_cfg.armature
         self.joint_model_name = f"{self.joint_model_name}({self.base_joint_cfg.joint_model_name})[{self.serial_index}]"
         super().__post_init__()
-
-
-@configclass
-class BoosterT2WaistParaWrapperCfg(ParallelJointWrapperCfg):
-    """Configuration for a parallel joint wrapper that transforms a base joint
-       configuration to parallel configuration for T2 waist.
-    """
-
-    joint_model_name: str = "BoosterT2WaistParaWrapper"
-
-    effort_ratio: tuple[float, float] = (2.5, 3.5)
-    velocity_ratio: tuple[float, float] = (0.8, 0.55)
-    armature_ratio: tuple[float, float] = (3.0, 7.0)
-
-
-@configclass
-class BoosterT2AnkleParaWrapperCfg(ParallelJointWrapperCfg):
-    """Configuration for a parallel joint wrapper that transforms a base joint
-       configuration to parallel configuration for T2 ankle.
-    """
-
-    joint_model_name: str = "BoosterT2AnkleParaWrapper"
-
-    effort_ratio: tuple[float, float] = (2.4, 1.7)
-    velocity_ratio: tuple[float, float] = (0.85, 1.17)
-    armature_ratio: tuple[float, float] = (3.0, 1.5)
 
 
 @configclass
@@ -338,9 +326,9 @@ class BoosterJointE4315(BoosterJointCfg):
 
     joint_model_name: str = "E4315"
 
-    effort_limit: float = 76.0
-    velocity_limit: float = 12.57
-    knee_point_velocity: float = 2.62
+    effort_limit: float = 43.0
+    velocity_limit: float = 12.15
+    knee_point_velocity: float = 8.38
     armature: float = 0.0339552
 
 
@@ -396,27 +384,108 @@ class BoosterJointHT4438(BoosterJointCfg):
     armature: float = 0.001
 
 
-# T1 Hip-Pitch
+# T1 joint models
 @configclass
 class BoosterJointE8112(BoosterJointCfg):
-    """Configuration for E8112 booster joint model."""
+    """Configuration for the T1 E8112 booster joint model."""
 
     joint_model_name: str = "E8112"
-
-    effort_limit: float = 96.0
-    velocity_limit: float = 16.76
-    knee_point_velocity: float = 7.54
+    effort_limit: float = 98.8
+    velocity_limit: float = 15.29
+    knee_point_velocity: float = 7.53
     armature: float = 0.0523908
 
 
-# T1 Neck
+@configclass
+class BoosterJointT1E8116(BoosterJointCfg):
+    """Configuration for the T1 E8116 booster joint model."""
+
+    joint_model_name: str = "E8116"
+    effort_limit: float = 130.5
+    velocity_limit: float = 14.76
+    knee_point_velocity: float = 6.71
+    armature: float = 0.0636012
+
+
 @configclass
 class BoosterJointDM4310(BoosterJointCfg):
-    """Configuration for DM4310 booster joint model."""
+    """Configuration for the T1 DM4310 booster joint model."""
 
     joint_model_name: str = "DM4310"
-
     effort_limit: float = 7.0
-    velocity_limit: float = 12.57
-    knee_point_velocity: float = 41.89
+    velocity_limit: float = 41.89
+    knee_point_velocity: float = 26.18
     armature: float = 0.0018
+
+
+# T2 joint models. T2 actuator data is specified in RPM and converted to rad/s.
+@configclass
+class BoosterJointB4522_35(BoosterJointCfg):
+    """Configuration for the T2 B4522-35 booster joint model."""
+
+    joint_model_name: str = "B4522-35"
+    effort_limit: float = 22
+    velocity_limit: float = 177 * RPM2RADPS
+    knee_point_velocity: float = 122 * RPM2RADPS
+    armature: float = 0.007209
+    natural_freq: float = 8
+
+
+@configclass
+class BoosterJointB6030_24(BoosterJointCfg):
+    """Configuration for the T2 B6030-24 booster joint model."""
+
+    joint_model_name: str = "B6030-24"
+    effort_limit: float = 74
+    velocity_limit: float = 224 * RPM2RADPS
+    knee_point_velocity: float = 110 * RPM2RADPS
+    armature: float = 0.017
+    natural_freq: float = 8
+
+
+@configclass
+class BoosterJointB6025_24(BoosterJointCfg):
+    """Configuration for the T2 B6025-24 booster joint model."""
+
+    joint_model_name: str = "B6025-24"
+    effort_limit: float = 60
+    velocity_limit: float = 227 * RPM2RADPS
+    knee_point_velocity: float = 123 * RPM2RADPS
+    armature: float = 0.0137
+    natural_freq: float = 8
+
+
+@configclass
+class BoosterJointB7629_22(BoosterJointCfg):
+    """Configuration for the T2 B7629-22 booster joint model."""
+
+    joint_model_name: str = "B7629-22"
+    effort_limit: float = 135
+    velocity_limit: float = 200 * RPM2RADPS
+    knee_point_velocity: float = 59 * RPM2RADPS
+    armature: float = 0.0281
+    natural_freq: float = 8
+
+
+@configclass
+class BoosterT2WaistParaWrapperCfg(ParallelJointWrapperCfg):
+    """Parallel joint wrapper configuration for the T2 waist."""
+
+    joint_model_name: str = "BoosterT2WaistParaWrapper"
+    effort_ratio: tuple[float, float] = (2.3, 2.4)
+    velocity_ratio: tuple[float, float] = (0.5, 0.4)
+    armature_ratio: tuple[float, float] = (2.884254, 3.825669)
+    knee_point_velocity_ratio: tuple[float, float] = (0.5, 0.4)
+    natural_freq: float = 8
+
+
+@configclass
+class BoosterT2AnkleParaWrapperCfg(ParallelJointWrapperCfg):
+    """Parallel joint wrapper configuration for the T2 ankle."""
+
+    joint_model_name: str = "BoosterT2AnkleParaWrapper"
+    effort_ratio: tuple[float, float] = (2.2, 1.2)
+    velocity_ratio: tuple[float, float] = (0.7, 1.0)
+    armature_ratio: tuple[float, float] = (2.620008, 0.9734019)
+    knee_point_velocity_ratio: tuple[float, float] = (0.7, 1.0)
+    natural_freq: float = 8

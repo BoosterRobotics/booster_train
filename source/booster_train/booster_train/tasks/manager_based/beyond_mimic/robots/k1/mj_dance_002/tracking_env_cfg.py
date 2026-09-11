@@ -160,8 +160,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 0.6),
-            "dynamic_friction_range": (0.3, 0.6),
+            "static_friction_range": (0.3, 1.4),
+            "dynamic_friction_range": (0.3, 1.0),
             "restitution_range": (0.0, 0.5),
             "num_buckets": 64,
         },
@@ -172,7 +172,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "pos_distribution_params": (-0.01, 0.01),
+            "pos_distribution_params": (-0.02, 0.02),
             "operation": "add",
         },
     )
@@ -181,9 +181,19 @@ class EventCfg:
         func=mdp.randomize_rigid_body_com,
         mode="startup",
         params={
-            # "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names="Trunk"),
-            "com_range": {"x": (-0.025, 0.025), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+        },
+    )
+    randomize_actuator_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stiffness_distribution_params": (0.9, 1.1),
+            "damping_distribution_params": (0.9, 1.1),
+            "operation": "scale",
+            "distribution": "uniform",
         },
     )
 
@@ -191,7 +201,7 @@ class EventCfg:
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
-        interval_range_s=(1.0, 3.0),
+        interval_range_s=(1.0, 4.0),
         params={"velocity_range": VELOCITY_RANGE},
     )
 
@@ -212,7 +222,7 @@ class RewardsCfg:
     )
     motion_body_pos = RewTerm(
         func=mdp.motion_relative_body_position_error_exp,
-        weight=1.0,
+        weight=1.5,
         params={"command_name": "motion", "std": 0.3},
     )
     motion_body_ori = RewTerm(
@@ -230,6 +240,8 @@ class RewardsCfg:
         weight=1.0,
         params={"command_name": "motion", "std": 3.14},
     )
+    joint_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-6)
+    joint_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1e-5)
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-1e-1)
     joint_limit = RewTerm(
         func=mdp.joint_pos_limits,
@@ -238,16 +250,28 @@ class RewardsCfg:
     )
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
-        weight=-0.1,
+        weight=-0.3,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
                 body_names=[
-                    r"^(?!left_hand_link$)(?!right_hand_link$)(?!left_foot_link$)(?!right_foot_link$).+$"
+                    r"^(?!left_elbow_yaw_link$)(?!right_elbow_yaw_link$)(?!left_ankle_roll_link$)(?!right_ankle_roll_link$).+$"
                 ],
             ),
             "threshold": 1.0,
         },
+    )
+
+    motion_foot_ori = RewTerm(
+        func=mdp.motion_relative_body_orientation_error_exp,
+        weight=1.5,
+        params={"command_name": "motion", "std": 0.2, "body_names": ["left_ankle_roll_link", "right_ankle_roll_link"]},
+    )
+
+    motion_foot_pos = RewTerm(
+        func=mdp.motion_relative_body_position_error_exp,
+        weight=1.5,
+        params={"command_name": "motion", "std": 0.2, "body_names": ["left_ankle_roll_link", "right_ankle_roll_link"]},
     )
 
 
@@ -270,10 +294,10 @@ class TerminationsCfg:
             "command_name": "motion",
             "threshold": 0.25,
             "body_names": [
-                "left_hand_link",
-                "right_hand_link",
-                "left_foot_link",
-                "right_foot_link",
+                "left_elbow_yaw_link",
+                "right_elbow_yaw_link",
+                "left_ankle_roll_link",
+                "right_ankle_roll_link",
             ],
         },
     )

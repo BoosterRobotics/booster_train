@@ -10,6 +10,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import csv
 import sys
 import numpy as np
 
@@ -29,8 +30,15 @@ parser.add_argument(
         " loaded."
     ),
 )
-parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
+parser.add_argument("--output_file", type=str, required=True, help="The path to the output motion npz file.")
 parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
+parser.add_argument(
+    "--robot",
+    type=str,
+    choices=("k1", "t1", "t2"),
+    default="k1",
+    help="The Booster robot model used by the motion data.",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -56,10 +64,17 @@ from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, 
 ##
 # Pre-defined configs
 ##
-# Booster assets currently only provide retargeted motion data for Booster K1 robot
-from booster_train.assets.robots.booster import BOOSTER_K1_CFG as ROBOT_CFG
-from booster_assets.motions import K1_JOINT_NAMES as JOINT_NAMES
-
+if args_cli.robot == "k1":
+    from booster_train.assets.robots.booster_k1 import BOOSTER_K1_CFG as ROBOT_CFG
+    from booster_train.assets.robots.motion_joint_names import K1_CSV_JOINT_NAMES as CSV_JOINT_NAMES
+elif args_cli.robot == "t1":
+    from booster_train.assets.robots.booster_t1 import BOOSTER_T1_CFG as ROBOT_CFG
+    from booster_train.assets.robots.motion_joint_names import T1_CSV_JOINT_NAMES as CSV_JOINT_NAMES
+elif args_cli.robot == "t2":
+    from booster_train.assets.robots.booster_t2 import BOOSTER_T2_CFG as ROBOT_CFG
+    from booster_train.assets.robots.motion_joint_names import T2_CSV_JOINT_NAMES as CSV_JOINT_NAMES
+else:
+    raise ValueError(f"Unknown robot: {args_cli.robot}")
 
 @configclass
 class ReplayMotionsSceneCfg(InteractiveSceneCfg):
@@ -89,33 +104,67 @@ class MotionLoader:
         output_fps: int,
         device: torch.device,
         frame_range: tuple[int, int] | None,
+        csv_joint_names: list[str],
     ):
         self.motion_file = motion_file
         self.input_fps = input_fps
         self.output_fps = output_fps
+        if self.input_fps <= 0 or self.output_fps <= 0:
+            raise ValueError(f"FPS values must be positive, got input_fps={input_fps}, output_fps={output_fps}.")
         self.input_dt = 1.0 / self.input_fps
         self.output_dt = 1.0 / self.output_fps
         self.current_idx = 0
         self.device = device
         self.frame_range = frame_range
+        self.csv_joint_names = csv_joint_names
         self._load_motion()
         self._interpolate_motion()
         self._compute_velocities()
 
     def _load_motion(self):
         """Loads the motion from the csv file."""
+        with open(self.motion_file, newline="") as csv_file:
+            first_row = next(csv.reader(csv_file), None)
+        if not first_row:
+            raise ValueError(f"CSV motion file is empty: {self.motion_file}")
+
+        try:
+            [float(value) for value in first_row]
+            header_rows = 0
+        except ValueError:
+            header_rows = 1
+
+        if header_rows:
+            header_joint_names = [name.strip() for name in first_row[7:]]
+            # K1 CSV files use historical shoulder names without the URDF's leading "aa".
+            normalized_header_names = [name.removeprefix("aa") for name in header_joint_names]
+            normalized_expected_names = [name.removeprefix("aa") for name in self.csv_joint_names]
+            if normalized_header_names != normalized_expected_names:
+                raise ValueError(
+                    f"CSV joint columns do not match the {args_cli.robot.upper()} robot joint order."
+                )
+
         if self.frame_range is None:
-            motion = torch.from_numpy(np.loadtxt(self.motion_file, delimiter=","))
+            motion = torch.from_numpy(np.loadtxt(self.motion_file, delimiter=",", skiprows=header_rows))
         else:
+            start_frame, end_frame = self.frame_range
+            if start_frame < 1 or end_frame < start_frame:
+                raise ValueError(f"Invalid frame range: {start_frame} {end_frame}")
             motion = torch.from_numpy(
                 np.loadtxt(
                     self.motion_file,
                     delimiter=",",
-                    skiprows=self.frame_range[0] - 1,
-                    max_rows=self.frame_range[1] - self.frame_range[0] + 1,
+                    skiprows=header_rows + start_frame - 1,
+                    max_rows=end_frame - start_frame + 1,
                 )
             )
-        motion = motion.to(torch.float32).to(self.device)
+        motion = torch.atleast_2d(motion).to(torch.float32).to(self.device)
+        expected_columns = 7 + len(self.csv_joint_names)
+        if motion.shape[1] != expected_columns:
+            raise ValueError(
+                f"CSV motion for {args_cli.robot.upper()} must have {expected_columns} columns "
+                f"(3 root position + 4 root quaternion + {len(self.csv_joint_names)} joints), got {motion.shape[1]}."
+            )
         self.motion_base_poss_input = motion[:, :3]
         self.motion_base_rots_input = motion[:, 3:7]
         self.motion_base_rots_input = self.motion_base_rots_input[:, [3, 0, 1, 2]]  # convert to wxyz
@@ -127,8 +176,14 @@ class MotionLoader:
 
     def _interpolate_motion(self):
         """Interpolates the motion to the output fps."""
-        times = torch.arange(0, self.duration, self.output_dt, device=self.device, dtype=torch.float32)
-        self.output_frames = times.shape[0]
+        self.output_frames = round(self.duration * self.output_fps) + 1
+        times = torch.linspace(
+            0.0,
+            self.duration,
+            self.output_frames,
+            device=self.device,
+            dtype=torch.float32,
+        )
         index_0, index_1, blend = self._compute_frame_blend(times)
         self.motion_base_poss = self._lerp(
             self.motion_base_poss_input[index_0],
@@ -163,6 +218,9 @@ class MotionLoader:
 
     def _compute_frame_blend(self, times: torch.Tensor) -> torch.Tensor:
         """Computes the frame blend for the motion."""
+        if self.input_frames == 1:
+            index = torch.zeros_like(times, dtype=torch.long)
+            return index, index, torch.zeros_like(times)
         phase = times / self.duration
         index_0 = (phase * (self.input_frames - 1)).floor().long()
         index_1 = torch.minimum(index_0 + 1, torch.tensor(self.input_frames - 1))
@@ -171,6 +229,11 @@ class MotionLoader:
 
     def _compute_velocities(self):
         """Computes the velocities of the motion."""
+        if self.output_frames == 1:
+            self.motion_base_lin_vels = torch.zeros_like(self.motion_base_poss)
+            self.motion_dof_vels = torch.zeros_like(self.motion_dof_poss)
+            self.motion_base_ang_vels = torch.zeros_like(self.motion_base_poss)
+            return
         self.motion_base_lin_vels = torch.gradient(self.motion_base_poss, spacing=self.output_dt, dim=0)[0]
         self.motion_dof_vels = torch.gradient(self.motion_dof_poss, spacing=self.output_dt, dim=0)[0]
         self.motion_base_ang_vels = self._so3_derivative(self.motion_base_rots, self.output_dt)
@@ -218,8 +281,12 @@ class MotionLoader:
         return state, reset_flag
 
 
-def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joint_names: list[str]):
+def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Runs the simulation loop."""
+    # Extract scene entities
+    robot = scene["robot"]
+    robot_joint_indexes = robot.find_joints(CSV_JOINT_NAMES, preserve_order=True)[0]
+
     # Load motion
     motion = MotionLoader(
         motion_file=args_cli.input_file,
@@ -227,11 +294,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
         output_fps=args_cli.output_fps,
         device=sim.device,
         frame_range=args_cli.frame_range,
+        csv_joint_names=CSV_JOINT_NAMES,
     )
-
-    # Extract scene entities
-    robot = scene["robot"]
-    robot_joint_indexes = robot.find_joints(joint_names, preserve_order=True)[0]
 
     # ------- data logger -------------------------------------------------------
     log = {
@@ -303,8 +367,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
             ):
                 log[k] = np.stack(log[k], axis=0)
 
-            np.savez(f"{args_cli.output_name}", **log)
-            print(f"[INFO]: Motion saved to {args_cli.output_name}")
+            np.savez(args_cli.output_file, **log)
+            print(f"[INFO]: Motion saved to {args_cli.output_file}")
             sys.exit(0)
 
 
@@ -322,11 +386,7 @@ def main():
     # Now we are ready!
     print("[INFO]: Setup complete...")
     # Run the simulator
-    run_simulator(
-        sim,
-        scene,
-        joint_names=JOINT_NAMES,
-    )
+    run_simulator(sim, scene)
 
 
 if __name__ == "__main__":

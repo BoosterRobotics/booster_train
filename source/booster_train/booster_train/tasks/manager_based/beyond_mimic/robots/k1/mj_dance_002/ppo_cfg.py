@@ -4,5 +4,5 @@ from booster_train.tasks.manager_based.beyond_mimic.agents.rsl_rl_ppo_cfg import
 
 @configclass
 class PPORunnerCfg(BasePPORunnerCfg):
-    max_iterations = 30000
+    max_iterations = 20000
     experiment_name = "k1_mj_dance_002"

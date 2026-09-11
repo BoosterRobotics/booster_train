@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 from __future__ import annotations
 
 from dataclasses import MISSING
@@ -28,12 +33,12 @@ import booster_train.tasks.manager_based.beyond_mimic.mdp as mdp
 ##
 
 VELOCITY_RANGE = {
-    "x": (-0.7, 0.7),
-    "y": (-0.7, 0.7),
-    "z": (-0.4, 0.4),
-    "roll": (-0.7, 0.7),
-    "pitch": (-0.7, 0.7),
-    "yaw": (-0.9, 0.9),
+    "x": (-0.5, 0.5),
+    "y": (-0.5, 0.5),
+    "z": (-0.2, 0.2),
+    "roll": (-0.52, 0.52),
+    "pitch": (-0.52, 0.52),
+    "yaw": (-0.78, 0.78),
 }
 
 
@@ -160,8 +165,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 0.6),
-            "dynamic_friction_range": (0.3, 0.6),
+            "static_friction_range": (0.3, 1.6),
+            "dynamic_friction_range": (0.3, 1.2),
             "restitution_range": (0.0, 0.5),
             "num_buckets": 64,
         },
@@ -181,12 +186,21 @@ class EventCfg:
         func=mdp.randomize_rigid_body_com,
         mode="startup",
         params={
-            # "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names="Trunk"),
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
             "com_range": {"x": (-0.025, 0.025), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
         },
     )
 
+    body_mass_randomization = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "mass_distribution_params": (0.95, 1.05),
+            "operation": "scale",
+            "recompute_inertia": True,
+        },
+    )
     # interval
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
@@ -194,6 +208,21 @@ class EventCfg:
         interval_range_s=(1.0, 3.0),
         params={"velocity_range": VELOCITY_RANGE},
     )
+    # stiffness and damping randomized 
+    # randomize_actuator_gains = EventTerm(
+    #         func=mdp.randomize_actuator_gains,
+    #         mode="reset",
+    #         params={
+    #             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+    #             "stiffness_distribution_params": (0.95, 1.05),
+    #             "damping_distribution_params": (0.95, 1.05),
+    #             "operation": "scale",
+    #             "distribution": "uniform",
+    #         },
+    #     )
+
+
+
 
 
 @configclass
@@ -230,7 +259,12 @@ class RewardsCfg:
         weight=1.0,
         params={"command_name": "motion", "std": 3.14},
     )
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-2.0)
+    motion_trunk_lin_vel = RewTerm(
+        func=mdp.motion_global_body_linear_velocity_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 1.0, "body_names": ["trunk"]},
+    )
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-1e-1)
     joint_limit = RewTerm(
         func=mdp.joint_pos_limits,
         weight=-10.0,
@@ -238,57 +272,16 @@ class RewardsCfg:
     )
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
-        weight=-10.0,
+        weight=-0.1,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
                 body_names=[
-                    r"^(?!left_foot_link$)(?!right_foot_link$).+$"
+                    r"^(?!left_wrist_roll_link$)(?!right_wrist_roll_link$)(?!left_ankle_roll_link$)(?!right_ankle_roll_link$).+$"
                 ],
             ),
             "threshold": 1.0,
         },
-    )
-    motion_foot_ori = RewTerm(
-        func=mdp.motion_relative_body_orientation_error_exp,
-        weight=15.0,
-        params={"command_name": "motion", "std": 0.2, "body_names": ["left_foot_link", "right_foot_link"]},
-    )
-
-    motion_foot_pos = RewTerm(
-        func=mdp.motion_relative_body_position_error_exp,
-        weight=30.0,
-        params={"command_name": "motion", "std": 0.2, "body_names": ["left_foot_link", "right_foot_link"]},
-    )
-
-    motion_hand_ori = RewTerm(
-        func=mdp.motion_relative_body_orientation_error_exp,
-        weight=10.0,
-        params={"command_name": "motion", "std": 0.2, "body_names": ["left_hand_link", "right_hand_link"]},
-    )
-
-    motion_hand_pos = RewTerm(
-        func=mdp.motion_relative_body_position_error_exp,
-        weight=15.0,
-        params={"command_name": "motion", "std": 0.2, "body_names": ["left_hand_link", "right_hand_link"]},
-    )
-
-    motion_trunk_ori = RewTerm(
-        func=mdp.motion_relative_body_orientation_error_exp,
-        weight=30.0,
-        params={"command_name": "motion", "std": 0.2, "body_names": ["Trunk"]},
-    )
-
-    motion_trunk_pos = RewTerm(
-        func=mdp.motion_relative_body_position_error_exp,
-        weight=20.0,
-        params={"command_name": "motion", "std": 0.2, "body_names": ["Trunk"]},
-    )
-
-    motion_trunk_ang_vel = RewTerm(
-        func=mdp.motion_global_body_angular_velocity_error_exp,
-        weight=5.0,
-        params={"command_name": "motion", "std": 3.14, "body_names": ["Trunk"]},
     )
 
 
@@ -311,10 +304,10 @@ class TerminationsCfg:
             "command_name": "motion",
             "threshold": 0.25,
             "body_names": [
-                "left_hand_link",
-                "right_hand_link",
-                "left_foot_link",
-                "right_foot_link",
+                "left_wrist_roll_link",
+                "right_wrist_roll_link",
+                "left_ankle_roll_link",
+                "right_ankle_roll_link",
             ],
         },
     )
@@ -359,6 +352,7 @@ class TrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         # viewer settings
-        self.viewer.origin_type = "world"   # for rotation the view by mouse and keyboard
-        self.viewer.eye = (3.0, -4.0, 2.0)
-        self.viewer.lookat = (0.0, 0.0, 1.0)
+        self.viewer.eye = (1.5, 1.5, 1.5)
+        # self.viewer.origin_type = "world"
+        self.viewer.origin_type = "asset_root"
+        self.viewer.asset_name = "robot"

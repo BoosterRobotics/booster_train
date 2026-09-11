@@ -1,10 +1,10 @@
-# Booster RL Tasks
+# Booster train
 
 ## Overview
 
 This repository provides a set of reinforcement learning tasks for Booster robots using [Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/index.html).
-Currently it includes the fabulous [BeyondMimic motion tracking](https://github.com/HybridRobotics/whole_body_tracking) framework adapted to Booster K1 robots.
-This repository follows the standard Isaac Lab project structure, and is tested with IsaacLab 2.2 and Isaac Sim 5.0.
+Currently it includes the fabulous [BeyondMimic motion tracking](https://github.com/HybridRobotics/whole_body_tracking) framework, adapted for Booster robots, with support for the T2, T1, and K1 platforms.
+This repository follows the standard Isaac Lab project structure, and is tested with IsaacLab 2.3.2  and Isaac Sim 5.1.0
 
 ## Installation
 
@@ -30,7 +30,7 @@ This repository follows the standard Isaac Lab project structure, and is tested 
 - Prepare BeyondMimic motion data:
     ```bash
     # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python scripts/csv_to_npz.py --headless --input_file=<PATH_TO_BOOSTER_ASSETS>/motions/K1/<MOTION>.csv --input_fps=<FPS> --output_name=<PATH_TO_BOOSTER_ASSETS>/motions/K1/<MOTION>.npz
+    python scripts/csv_to_npz.py --headless --input_file=<PATH_TO_BOOSTER_ASSETS>/motions/K1/<MOTION>.csv --input_fps=<FPS> --output_file=<PATH_TO_BOOSTER_ASSETS>/motions/K1/<MOTION>.npz
     ```
 
 ## Usage
